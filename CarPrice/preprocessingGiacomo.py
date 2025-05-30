@@ -47,31 +47,41 @@ def elimina_variabili_vif_pvalue(X, y, vif_threshold=5.0, pvalue_threshold=0.05)
     print("Feature finali:", X_current.columns.tolist())
     return X_current
 
-# Preprocessing principale
-if __name__ == '__main__':
+
+def preprocess_train():
     # Carica dati
-    df = pd.read_csv('CarPrice/train.csv')
+    df = pd.read_csv('CarPrice/data/train.csv')
 
     # 1. Converti 'running' in miles
     df['running_miles'] = df['running'].apply(convert_running_to_miles)
 
     # 2. Label Encoding per colonne categoriche
-    cols_to_encode = ['model', 'motor_type', 'wheel', 'color', 'status']
+    cols_to_encode = ['model', 'motor_type', 'wheel', 'color', 'type', 'status']
     le_dict = {}
     for col in cols_to_encode:
         le = LabelEncoder()
         df[col + '_enc'] = le.fit_transform(df[col].astype(str))
         le_dict[col] = dict(zip(le.classes_, le.transform(le.classes_)))
         print(f"Mappatura '{col}':", le_dict[col])
-        
+    df_cleaned = df.copy()  
+    df_cleaned.drop(columns=cols_to_encode + ['running'], inplace=True)  # Rimuovi colonne originali    
     # 2.1 Salvataggio train in cleaned_train.csv
-    df.to_csv('cleaned_train.csv', index=False) 
+    df_cleaned.to_csv('CarPrice/data/cleaned_train.csv', index=False) 
     
     # 3. Preparazione features per VIF
     feature_cols = [col + '_enc' for col in cols_to_encode] + ['motor_volume', 'running_miles', 'price']
-    X = df[feature_cols]
-    y = df['price']
+    X = df_cleaned[feature_cols]
+    y = df_cleaned['price']
 
+        # 5. Matrice di correlazione
+    print("\n--- Matrice di Correlazione Before PValue ---")
+    corr_matrix = df[X.columns].corr()
+    print(corr_matrix)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm")
+    plt.title("Correlation Matrix before PValue")
+    plt.show()
+    
     # 4. Eliminazione variabili collineari e non significative
     print("\n--- Analisi VIF e p-value ---")
     X_selected = elimina_variabili_vif_pvalue(X, y)
@@ -79,10 +89,13 @@ if __name__ == '__main__':
     
     
     # 5. Matrice di correlazione
-    print("\n--- Matrice di Correlazione ---")
+    print("\n--- Matrice di Correlazione After PValue---")
     corr_matrix = df[X_selected.columns].corr()
     print(corr_matrix)
     plt.figure(figsize=(8, 6))
     sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm")
-    plt.title("Correlation Matrix")
+    plt.title("Correlation Matrix After PValue")
     plt.show()
+    
+preprocess_train()
+
