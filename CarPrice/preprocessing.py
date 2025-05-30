@@ -107,8 +107,8 @@ def preprocess_test(path_csv, drop_wheel=True):
     if drop_wheel:
         drop_cols.remove('wheel')
     df_clean = df.drop(columns=drop_cols)
-    num_cols=['motor_volume','running_miles']
-    df_clean = remove_outliers_iqr(df_clean, num_cols, show=False)
+   
+   
     feature_cols = [c+'_enc' for c in cols_cat] + ['motor_volume','running_miles']
     X_test = df_clean[feature_cols]
     return X_test
