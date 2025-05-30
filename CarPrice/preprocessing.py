@@ -146,8 +146,3 @@ def nested_cv_evaluation(X, y):
         print(f"{name}: RMSE nested CV = {rmse_scores.mean():.2f} ± {rmse_scores.std():.2f}")
     return results
 
-# ------------ Esecuzione Principale ------------
-
-if __name__ == '__main__':
-    X, y = preprocess_train('CarPrice/data/train.csv')
-    nested_results = nested_cv_evaluation(X, y)
