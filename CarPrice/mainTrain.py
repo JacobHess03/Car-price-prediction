@@ -1,11 +1,11 @@
-from CarPrice.preprocessingGiacomo import preprocess_train
+from preprocessing import preprocess_train
 from sklearn.model_selection import GridSearchCV, cross_val_score, KFold
 from sklearn.ensemble import RandomForestRegressor
+import joblib
 from xgboost import XGBRegressor
 
 
 # ------------ Modelli e Nested CV ------------
-
 def nested_cv_evaluation(X, y):
     models = {
         'RandomForest': {
@@ -26,6 +26,7 @@ def nested_cv_evaluation(X, y):
     }
     outer_cv = KFold(n_splits=5, shuffle=True, random_state=42)
     results = {}
+    best_models = {}
     for name, mp in models.items():
         inner_cv = KFold(n_splits=3, shuffle=True, random_state=1)
         gsearch = GridSearchCV(mp['estimator'], mp['params'], cv=inner_cv,
@@ -35,7 +36,13 @@ def nested_cv_evaluation(X, y):
         rmse_scores = -scores
         results[name] = rmse_scores
         print(f"{name}: RMSE nested CV = {rmse_scores.mean():.2f} ± {rmse_scores.std():.2f}")
-    return results
+        # Fit best model on full data for later use and save
+        gsearch.fit(X, y)
+        best_models[name] = gsearch.best_estimator_
+        model_file = f"CarPrice/models/{name}_best_model.joblib"
+        joblib.dump(gsearch.best_estimator_, model_file)
+        print(f"Modello {name} salvato in: {model_file}")
+    return results, best_models
 
 # ------------ Esecuzione Principale ------------
 
