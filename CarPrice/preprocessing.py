@@ -9,7 +9,6 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import GridSearchCV, cross_val_score, KFold
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 # ------------ Funzioni di Preprocessing ------------
