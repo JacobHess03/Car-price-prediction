@@ -11,7 +11,7 @@ def generate_submission(test_csv_path, best_model, output_path='submission.csv')
     X_test = df_test_clean[feature_cols]
     preds = best_model.predict(X_test)
     submission = pd.DataFrame({
-        'id': df_test['Id'],
+        'Id': df_test['Id'],
         'price': preds
     })
     submission.to_csv(output_path, index=False)
