@@ -6,96 +6,130 @@ import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import GridSearchCV, cross_val_score, KFold
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-# Funzione per convertire 'running' in miles (rimuove unità e converte km->miles)
+# ------------ Funzioni di Preprocessing ------------
+
 def convert_running_to_miles(val):
     s = str(val).strip().lower()
-    # Estrai numero
     num_match = re.search(r"([0-9,.]+)", s)
     if not num_match:
         return np.nan
     num = float(num_match.group().replace(',', ''))
-    # Verifica unità
     if 'km' in s:
-        num = num * 0.621371  # km to miles
-    # Se 'miles' o unità mancante, assume sia già miles
+        num *= 0.621371
     return num
 
-# Funzione per eliminare feature basate su VIF e p-value
+
+def remove_outliers_iqr(df, cols, k=1.5, show=True):
+    cleaned = df.copy()
+    for col in cols:
+        if col not in cleaned.columns:
+            continue
+        Q1 = cleaned[col].quantile(0.25)
+        Q3 = cleaned[col].quantile(0.75)
+        IQR = Q3 - Q1
+        lower, upper = Q1 - k * IQR, Q3 + k * IQR
+        if (cleaned[col] < lower).any() or (cleaned[col] > upper).any():
+            if show:
+                plt.figure(figsize=(6,4))
+                plt.boxplot(cleaned[col].dropna(), vert=False)
+                plt.title(f"Boxplot di {col} (con outlier)")
+                plt.xlabel(col)
+                plt.show()
+            cleaned = cleaned[(cleaned[col] >= lower) & (cleaned[col] <= upper)]
+            if show:
+                plt.figure(figsize=(6,4))
+                plt.boxplot(cleaned[col].dropna(), vert=False)
+                plt.title(f"Boxplot di {col} (senza outlier)")
+                plt.xlabel(col)
+                plt.show()
+    return cleaned
+
+
 def elimina_variabili_vif_pvalue(X, y, vif_threshold=5.0, pvalue_threshold=0.05):
     X_current = X.copy()
     while True:
-        X_const = sm.add_constant(X_current)
-        model = sm.OLS(y, X_const).fit()
-        pvals = model.pvalues.drop('const')
-        vif_data = pd.DataFrame({
-            'Feature': X_current.columns,
-            'VIF': [variance_inflation_factor(X_current.values, i)
-                    for i in range(X_current.shape[1])],
-            'p-value': pvals.values
-        })
+        model = sm.OLS(y, sm.add_constant(X_current)).fit()
+        pvals = model.pvalues.drop('const', errors='ignore')
+        vif_list = []
+        for i, feat in enumerate(X_current.columns):
+            vif = variance_inflation_factor(X_current.values, i)
+            pval = pvals.get(feat, np.nan)
+            vif_list.append({'Feature': feat, 'VIF': vif, 'p-value': pval})
+        vif_data = pd.DataFrame(vif_list)
         print(vif_data)
-        # Condizioni di rimozione
         cond = (vif_data['VIF'] > vif_threshold) & (vif_data['p-value'] > pvalue_threshold)
         if not cond.any():
             break
-        # Rimuovi feature con VIF più alto tra quelle da eliminare
-        to_remove = vif_data.loc[cond, 'Feature'].iloc[vif_data.loc[cond,'VIF'].argmax()]
-        print(f"Rimuovo '{to_remove}' (VIF={vif_data.loc[vif_data.Feature==to_remove,'VIF'].values[0]:.2f}, p={vif_data.loc[vif_data.Feature==to_remove,'p-value'].values[0]:.4f})")
-        X_current.drop(columns=[to_remove], inplace=True)
+        drop_feat = vif_data.loc[cond, 'Feature'].iloc[vif_data.loc[cond, 'VIF'].argmax()]
+        print(f"Rimuovo {drop_feat}")
+        X_current.drop(columns=[drop_feat], inplace=True)
     print("Feature finali:", X_current.columns.tolist())
     return X_current
 
+# ------------ Preprocessing pipeline ------------
 
-def preprocess_train():
-    # Carica dati
-    df = pd.read_csv('CarPrice/data/train.csv')
-
-    # 1. Converti 'running' in miles
+def preprocess_train(path_csv, drop_wheel=True, show_outliers=True):
+    df = pd.read_csv(path_csv)
     df['running_miles'] = df['running'].apply(convert_running_to_miles)
-
-    # 2. Label Encoding per colonne categoriche
-    cols_to_encode = ['model', 'motor_type', 'wheel', 'color', 'type', 'status']
-    le_dict = {}
-    for col in cols_to_encode:
+    cols_cat = ['model','motor_type','wheel','color','type','status']
+    for col in cols_cat:
+        df[col] = df[col].astype(str)
         le = LabelEncoder()
-        df[col + '_enc'] = le.fit_transform(df[col].astype(str))
-        le_dict[col] = dict(zip(le.classes_, le.transform(le.classes_)))
-        print(f"Mappatura '{col}':", le_dict[col])
-    df_cleaned = df.copy()  
-    df_cleaned.drop(columns=cols_to_encode + ['running'], inplace=True)  # Rimuovi colonne originali    
-    # 2.1 Salvataggio train in cleaned_train.csv
-    df_cleaned.to_csv('CarPrice/data/cleaned_train.csv', index=False) 
-    
-    # 3. Preparazione features per VIF
-    feature_cols = [col + '_enc' for col in cols_to_encode] + ['motor_volume', 'running_miles', 'price']
-    X = df_cleaned[feature_cols]
-    y = df_cleaned['price']
+        df[col+'_enc'] = le.fit_transform(df[col])
+    drop_cols = cols_cat + ['running']
+    if drop_wheel:
+        drop_cols.remove('wheel')
+    df_clean = df.drop(columns=drop_cols)
+    num_cols=['motor_volume','running_miles','price']
+    df_clean = remove_outliers_iqr(df_clean, num_cols, show=show_outliers)
+    df_clean.to_csv('CarPrice/data/cleaned_train.csv', index=False)
+    feature_cols = [c+'_enc' for c in cols_cat] + ['motor_volume','running_miles']
+    X = df_clean[feature_cols]
+    y = df_clean['price']
+    X = elimina_variabili_vif_pvalue(X, y)
+    return X, y
 
-        # 5. Matrice di correlazione
-    print("\n--- Matrice di Correlazione Before PValue ---")
-    corr_matrix = df[X.columns].corr()
-    print(corr_matrix)
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm")
-    plt.title("Correlation Matrix before PValue")
-    plt.show()
-    
-    # 4. Eliminazione variabili collineari e non significative
-    print("\n--- Analisi VIF e p-value ---")
-    X_selected = elimina_variabili_vif_pvalue(X, y)
+# ------------ Modelli e Nested CV ------------
 
-    
-    
-    # 5. Matrice di correlazione
-    print("\n--- Matrice di Correlazione After PValue---")
-    corr_matrix = df[X_selected.columns].corr()
-    print(corr_matrix)
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm")
-    plt.title("Correlation Matrix After PValue")
-    plt.show()
-    
-preprocess_train()
+def nested_cv_evaluation(X, y):
+    models = {
+        'RandomForest': {
+            'estimator': RandomForestRegressor(random_state=42),
+            'params': {
+                'n_estimators': [50, 100],
+                'max_depth': [None, 5, 10]
+            }
+        },
+        'XGBoost': {
+            'estimator': XGBRegressor(objective='reg:squarederror', random_state=42),
+            'params': {
+                'n_estimators': [50, 100],
+                'learning_rate': [0.05, 0.1],
+                'max_depth': [3, 5]
+            }
+        }
+    }
+    outer_cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    results = {}
+    for name, mp in models.items():
+        inner_cv = KFold(n_splits=3, shuffle=True, random_state=1)
+        gsearch = GridSearchCV(mp['estimator'], mp['params'], cv=inner_cv,
+                               scoring='neg_root_mean_squared_error', n_jobs=-1)
+        scores = cross_val_score(gsearch, X, y, cv=outer_cv,
+                                 scoring='neg_root_mean_squared_error', n_jobs=-1)
+        rmse_scores = -scores
+        results[name] = rmse_scores
+        print(f"{name}: RMSE nested CV = {rmse_scores.mean():.2f} ± {rmse_scores.std():.2f}")
+    return results
 
+# ------------ Esecuzione Principale ------------
+
+if __name__ == '__main__':
+    X, y = preprocess_train('CarPrice/data/train.csv')
+    nested_results = nested_cv_evaluation(X, y)
